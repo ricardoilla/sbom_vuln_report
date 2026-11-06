@@ -222,27 +222,38 @@ class App(tk.Tk):
         ttk.Button(toolbar, text="+ Agregar pestaña", command=self._add_tab_dialog).pack(side="left")
         ttk.Button(toolbar, text="Cerrar pestaña actual", command=self._close_current_tab).pack(side="left", padx=(8, 0))
 
+        self.empty_label = ttk.Label(
+            self,
+            text='No hay pestañas todavía. Usá "+ Agregar pestaña" y ponele el nombre que quieras '
+                 "(el componente que estés analizando en este proyecto).",
+            foreground="#777", padding=20,
+        )
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        for name in ("App", "Backend", "Admin Panel"):
-            self._add_tab(name)
+        self._update_empty_state()
 
     def _add_tab(self, name: str):
         tab = ComponentTab(self.notebook, name)
         self.notebook.add(tab, text=name)
         self.notebook.select(tab)
+        self._update_empty_state()
 
     def _add_tab_dialog(self):
-        name = simpledialog.askstring("Nueva pestaña", "Nombre del componente (ej. App, Backend, Admin Panel):")
-        if name:
+        name = simpledialog.askstring("Nueva pestaña", "Nombre de esta pestaña (el componente que vas a analizar):")
+        if name and name.strip():
             self._add_tab(name.strip())
 
     def _close_current_tab(self):
         current = self.notebook.select()
         if not current:
             return
-        if len(self.notebook.tabs()) == 1:
-            messagebox.showinfo("No se puede cerrar", "Tiene que quedar al menos una pestaña abierta.")
-            return
         self.notebook.forget(current)
+        self._update_empty_state()
+
+    def _update_empty_state(self):
+        if self.notebook.tabs():
+            self.empty_label.pack_forget()
+        else:
+            self.empty_label.pack(fill="x")
