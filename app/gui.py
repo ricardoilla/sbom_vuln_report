@@ -6,8 +6,9 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from .export import export_csv, export_xlsx
 from .models import SEVERITY_ORDER
 from .osv_runner import OsvScanError, run_scan
+from .package_view import group_by_package
 
-COLUMNS = [
+VULN_COLUMNS = [
     ("cve", "CVE", 150),
     ("published", "Published", 100),
     ("osv_url", "OSV URL", 260),
@@ -20,12 +21,24 @@ COLUMNS = [
     ("component", "Component", 100),
 ]
 
+PACKAGE_COLUMNS = [
+    ("component", "Component", 100),
+    ("package_and_version", "Package(s) & Version", 220),
+    ("open_findings", "Open findings", 90),
+    ("where_it_runs", "Where it runs", 220),
+    ("justification", "Justification / Disposition", 280),
+    ("risk_accepted_until", "Risk accepted until", 130),
+]
+
 
 class ComponentTab(ttk.Frame):
-    def __init__(self, parent, name: str):
+    def __init__(self, parent, name: str, on_change=None):
         super().__init__(parent, padding=10)
         self.component_name = name
+        self.on_change = on_change or (lambda: None)
         self.findings: list = []
+        self.total_packages = 0
+        self.view_mode = "vuln"  # o "package"
 
         self.cdx_path = tk.StringVar()
         self.lock_path = tk.StringVar()
@@ -58,10 +71,16 @@ class ComponentTab(ttk.Frame):
         ttk.Button(frame, text="Elegir...", command=self._pick_lock).grid(row=1, column=2, padx=4, pady=4)
 
         ttk.Checkbutton(
-            frame, text="Usar osv-scanner.toml (si no, se ignora)", variable=self.use_toml
+            frame, text="Aplicar el .toml como filtro (si no, el escaneo es el crudo)", variable=self.use_toml
         ).grid(row=2, column=0, sticky="w", padx=4, pady=4)
         ttk.Entry(frame, textvariable=self.toml_path).grid(row=2, column=1, sticky="ew", padx=4, pady=4)
         ttk.Button(frame, text="Elegir...", command=self._pick_toml).grid(row=2, column=2, padx=4, pady=4)
+        ttk.Label(
+            frame,
+            text="Si hay un .toml seleccionado, igual se usa para completar 'Justification' y 'Risk accepted "
+                 "until' en la vista por paquete, se aplique o no como filtro.",
+            foreground="#777", wraplength=600, justify="left",
+        ).grid(row=3, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
 
     def _build_run_button(self):
         ttk.Button(self, text="Ejecutar análisis", command=self._run).pack(anchor="w", pady=(0, 8))
@@ -71,9 +90,11 @@ class ComponentTab(ttk.Frame):
         frame.pack(fill="x", pady=(0, 8))
 
         self.packages_var = tk.StringVar(value="Paquetes escaneados: -")
+        self.affected_var = tk.StringVar(value="Paquetes afectados: -")
         self.total_var = tk.StringVar(value="Vulnerabilidades: -")
         ttk.Label(frame, textvariable=self.packages_var).grid(row=0, column=0, sticky="w", padx=8, pady=4)
         ttk.Label(frame, textvariable=self.total_var).grid(row=0, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(frame, textvariable=self.affected_var).grid(row=0, column=2, sticky="w", padx=8, pady=4)
 
         self.severity_vars: dict[str, tk.StringVar] = {}
         for i, sev in enumerate(SEVERITY_ORDER):
@@ -82,14 +103,18 @@ class ComponentTab(ttk.Frame):
             ttk.Label(frame, textvariable=var).grid(row=1, column=i, sticky="w", padx=8, pady=4)
 
     def _build_table(self):
+        toggle_frame = ttk.Frame(self)
+        toggle_frame.pack(fill="x", pady=(0, 4))
+        self.toggle_button = ttk.Button(
+            toggle_frame, text="Ver por paquete", command=self._toggle_view_mode
+        )
+        self.toggle_button.pack(side="left")
+
         frame = ttk.Frame(self)
         frame.pack(fill="both", expand=True, pady=(0, 8))
 
-        columns = [c[0] for c in COLUMNS]
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings")
-        for key, title, width in COLUMNS:
-            self.tree.heading(key, text=title)
-            self.tree.column(key, width=width, anchor="w")
+        self.tree = ttk.Treeview(frame, show="headings")
+        self._set_tree_columns(VULN_COLUMNS)
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
@@ -100,6 +125,13 @@ class ComponentTab(ttk.Frame):
         hsb.grid(row=1, column=0, sticky="ew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
+
+    def _set_tree_columns(self, columns_spec):
+        keys = [c[0] for c in columns_spec]
+        self.tree["columns"] = keys
+        for key, title, width in columns_spec:
+            self.tree.heading(key, text=title)
+            self.tree.column(key, width=width, anchor="w")
 
     def _build_export_buttons(self):
         frame = ttk.Frame(self)
@@ -130,44 +162,67 @@ class ComponentTab(ttk.Frame):
         )
         if path:
             self.toml_path.set(path)
-            self.use_toml.set(True)
 
     # --- ejecución del escaneo ------------------------------------------------------
 
     def _run(self):
-        toml = self.toml_path.get().strip() if self.use_toml.get() else None
+        toml = self.toml_path.get().strip() or None
         self.status.set("Ejecutando osv-scanner...")
         self.update_idletasks()
 
         try:
-            findings, total_packages = run_scan(self.lock_path.get().strip(), toml, self.component_name)
+            findings, total_packages = run_scan(
+                self.lock_path.get().strip(), toml, self.use_toml.get(), self.component_name
+            )
         except OsvScanError as exc:
             messagebox.showerror("Error al ejecutar el análisis", str(exc))
             self.status.set("Falló el último análisis. Revisá los archivos seleccionados.")
             return
 
         self.findings = findings
+        self.total_packages = total_packages
         self._refresh_table()
-        self._refresh_summary(total_packages)
+        self._refresh_summary()
         self.status.set(f"Análisis completo. {len(findings)} vulnerabilidades en {total_packages} paquetes.")
+        self.on_change()
 
-    def _refresh_summary(self, total_packages: int):
-        self.packages_var.set(f"Paquetes escaneados: {total_packages}")
+    def _refresh_summary(self):
+        affected = len({(f.package, f.version) for f in self.findings})
+        self.packages_var.set(f"Paquetes escaneados: {self.total_packages}")
         self.total_var.set(f"Vulnerabilidades: {len(self.findings)}")
+        self.affected_var.set(f"Paquetes afectados: {affected}")
         counts = {sev: 0 for sev in SEVERITY_ORDER}
         for finding in self.findings:
             counts[finding.severity] += 1
         for sev, var in self.severity_vars.items():
             var.set(f"{sev}: {counts[sev]}")
 
+    def _toggle_view_mode(self):
+        if self.view_mode == "vuln":
+            self.view_mode = "package"
+            self.toggle_button.config(text="Ver por vulnerabilidad")
+        else:
+            self.view_mode = "vuln"
+            self.toggle_button.config(text="Ver por paquete")
+        self._refresh_table()
+
     def _refresh_table(self):
         self.tree.delete(*self.tree.get_children())
-        for finding in self.findings:
-            self.tree.insert("", "end", values=(
-                finding.cve, finding.published, finding.osv_url, finding.cvss_display,
-                finding.severity, finding.ecosystem, finding.package, finding.version,
-                finding.fixed_version, finding.component,
-            ))
+        if self.view_mode == "vuln":
+            self._set_tree_columns(VULN_COLUMNS)
+            for finding in self.findings:
+                self.tree.insert("", "end", values=(
+                    finding.cve, finding.published, finding.osv_url, finding.cvss_display,
+                    finding.severity, finding.ecosystem, finding.package, finding.version,
+                    finding.fixed_version, finding.component,
+                ))
+        else:
+            self._set_tree_columns(PACKAGE_COLUMNS)
+            for row in group_by_package(self.findings):
+                self.tree.insert("", "end", values=(
+                    row.component, row.package_and_version, row.open_findings,
+                    row.where_it_runs, row.justification, row.risk_accepted_until,
+                ))
 
     # --- exportación -----------------------------------------------------------------
 
@@ -215,12 +270,14 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SBOM Vulnerability Report — osv-scanner")
-        self.geometry("1150x650")
+        self.geometry("1150x720")
 
         toolbar = ttk.Frame(self, padding=(10, 8))
         toolbar.pack(fill="x")
         ttk.Button(toolbar, text="+ Agregar pestaña", command=self._add_tab_dialog).pack(side="left")
         ttk.Button(toolbar, text="Cerrar pestaña actual", command=self._close_current_tab).pack(side="left", padx=(8, 0))
+
+        self._build_global_summary()
 
         self.empty_label = ttk.Label(
             self,
@@ -234,8 +291,41 @@ class App(tk.Tk):
 
         self._update_empty_state()
 
+    def _build_global_summary(self):
+        frame = ttk.LabelFrame(self, text="Resumen global (todas las pestañas)", padding=8)
+        frame.pack(fill="x", padx=10, pady=(0, 4))
+
+        self.global_packages_var = tk.StringVar(value="Paquetes escaneados: -")
+        self.global_affected_var = tk.StringVar(value="Paquetes afectados: -")
+        self.global_total_var = tk.StringVar(value="Vulnerabilidades: -")
+        ttk.Label(frame, textvariable=self.global_packages_var).grid(row=0, column=0, sticky="w", padx=8, pady=2)
+        ttk.Label(frame, textvariable=self.global_total_var).grid(row=0, column=1, sticky="w", padx=8, pady=2)
+        ttk.Label(frame, textvariable=self.global_affected_var).grid(row=0, column=2, sticky="w", padx=8, pady=2)
+
+        self.global_severity_vars: dict[str, tk.StringVar] = {}
+        for i, sev in enumerate(SEVERITY_ORDER):
+            var = tk.StringVar(value=f"{sev}: -")
+            self.global_severity_vars[sev] = var
+            ttk.Label(frame, textvariable=var).grid(row=1, column=i, sticky="w", padx=8, pady=2)
+
+    def _recompute_global_summary(self):
+        tabs = [self.notebook.nametowidget(t) for t in self.notebook.tabs()]
+        total_packages = sum(tab.total_packages for tab in tabs)
+        all_findings = [f for tab in tabs for f in tab.findings]
+        affected = len({(f.package, f.version, f.component) for f in all_findings})
+
+        self.global_packages_var.set(f"Paquetes escaneados: {total_packages}")
+        self.global_total_var.set(f"Vulnerabilidades: {len(all_findings)}")
+        self.global_affected_var.set(f"Paquetes afectados: {affected}")
+
+        counts = {sev: 0 for sev in SEVERITY_ORDER}
+        for finding in all_findings:
+            counts[finding.severity] += 1
+        for sev, var in self.global_severity_vars.items():
+            var.set(f"{sev}: {counts[sev]}")
+
     def _add_tab(self, name: str):
-        tab = ComponentTab(self.notebook, name)
+        tab = ComponentTab(self.notebook, name, on_change=self._recompute_global_summary)
         self.notebook.add(tab, text=name)
         self.notebook.select(tab)
         self._update_empty_state()
@@ -251,6 +341,7 @@ class App(tk.Tk):
             return
         self.notebook.forget(current)
         self._update_empty_state()
+        self._recompute_global_summary()
 
     def _update_empty_state(self):
         if self.notebook.tabs():

@@ -33,6 +33,10 @@ class Finding:
     version: str
     fixed_version: str
     component: str
+    # Si el finding aparece en el .toml de excepciones, su "reason" e "ignoreUntil".
+    # Vacío si no hay .toml o si ese finding en particular no está ahí.
+    toml_reason: str = ""
+    toml_risk_accepted_until: str = ""
 
     @property
     def cvss_display(self) -> str:
