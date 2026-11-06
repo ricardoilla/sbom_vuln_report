@@ -43,7 +43,8 @@ class ComponentTab(ttk.Frame):
         self.cdx_path = tk.StringVar()
         self.lock_path = tk.StringVar()
         self.toml_path = tk.StringVar()
-        self.use_toml = tk.BooleanVar(value=False)
+        self.use_toml_filter = tk.BooleanVar(value=False)
+        self.use_toml_justification = tk.BooleanVar(value=True)
         self.status = tk.StringVar(value="Elegí al menos el package-lock.json y presioná Ejecutar análisis.")
 
         self._build_file_pickers()
@@ -70,17 +71,20 @@ class ComponentTab(ttk.Frame):
         ttk.Entry(frame, textvariable=self.lock_path).grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         ttk.Button(frame, text="Elegir...", command=self._pick_lock).grid(row=1, column=2, padx=4, pady=4)
 
-        ttk.Checkbutton(
-            frame, text="Aplicar el .toml como filtro (si no, el escaneo es el crudo)", variable=self.use_toml
-        ).grid(row=2, column=0, sticky="w", padx=4, pady=4)
+        ttk.Label(frame, text="osv-scanner.toml (opcional):").grid(row=2, column=0, sticky="w", padx=4, pady=4)
         ttk.Entry(frame, textvariable=self.toml_path).grid(row=2, column=1, sticky="ew", padx=4, pady=4)
         ttk.Button(frame, text="Elegir...", command=self._pick_toml).grid(row=2, column=2, padx=4, pady=4)
-        ttk.Label(
-            frame,
-            text="Si hay un .toml seleccionado, igual se usa para completar 'Justification' y 'Risk accepted "
-                 "until' en la vista por paquete, se aplique o no como filtro.",
-            foreground="#777", wraplength=600, justify="left",
-        ).grid(row=3, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
+
+        toml_opts = ttk.Frame(frame)
+        toml_opts.grid(row=3, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
+        ttk.Checkbutton(
+            toml_opts, text="Usarlo como filtro (reduce el conteo de vulnerabilidades)",
+            variable=self.use_toml_filter,
+        ).pack(side="left", padx=(0, 16))
+        ttk.Checkbutton(
+            toml_opts, text="Usarlo como justificación en la tabla (no filtra nada)",
+            variable=self.use_toml_justification,
+        ).pack(side="left")
 
     def _build_run_button(self):
         ttk.Button(self, text="Ejecutar análisis", command=self._run).pack(anchor="w", pady=(0, 8))
@@ -172,7 +176,9 @@ class ComponentTab(ttk.Frame):
 
         try:
             findings, total_packages = run_scan(
-                self.lock_path.get().strip(), toml, self.use_toml.get(), self.component_name
+                self.lock_path.get().strip(), toml,
+                self.use_toml_filter.get(), self.use_toml_justification.get(),
+                self.component_name,
             )
         except OsvScanError as exc:
             messagebox.showerror("Error al ejecutar el análisis", str(exc))

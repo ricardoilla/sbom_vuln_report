@@ -68,9 +68,19 @@ def run_scan(
     package_lock_path: str,
     toml_path: str | None,
     apply_toml_filter: bool,
+    use_toml_as_justification: bool,
     component: str,
 ) -> tuple[list[Finding], int]:
-    """Corre osv-scanner y devuelve (findings ordenados por CVSS desc, total de paquetes escaneados)."""
+    """Corre osv-scanner y devuelve (findings ordenados por CVSS desc, total de paquetes escaneados).
+
+    apply_toml_filter y use_toml_as_justification son interruptores independientes:
+    - apply_toml_filter: el .toml se copia junto al lockfile y osv-scanner lo aplica
+      de verdad (reduce qué aparece en los resultados).
+    - use_toml_as_justification: el .toml se lee para anotar cada Finding que matchee
+      con su reason/ignoreUntil (alimenta la columna Justification/Risk accepted until
+      de la vista por paquete), sin que eso quite ningún finding de la lista.
+    Se pueden usar junto, por separado, o ninguno.
+    """
     if shutil.which("osv-scanner") is None:
         raise OsvScanError(
             "No se encontró 'osv-scanner' en el PATH. Instalalo con: brew install osv-scanner"
@@ -78,11 +88,15 @@ def run_scan(
     if not package_lock_path or not Path(package_lock_path).is_file():
         raise OsvScanError("Elegí un package-lock.json válido antes de ejecutar el análisis.")
 
+    if (apply_toml_filter or use_toml_as_justification) and not toml_path:
+        raise OsvScanError("Elegí un archivo .toml antes de activar esa opción.")
+
     toml_lookup: dict[str, dict] = {}
     if toml_path:
         if not Path(toml_path).is_file():
             raise OsvScanError("El archivo .toml seleccionado no existe.")
-        toml_lookup = _parse_toml_lookup(toml_path)
+        if use_toml_as_justification:
+            toml_lookup = _parse_toml_lookup(toml_path)
 
     with tempfile.TemporaryDirectory(prefix="osv_scan_") as tmp:
         tmp_dir = Path(tmp)
