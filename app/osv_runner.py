@@ -88,8 +88,8 @@ def run_scan(
     if not package_lock_path or not Path(package_lock_path).is_file():
         raise OsvScanError("Elegí un package-lock.json válido antes de ejecutar el análisis.")
 
-    if (apply_toml_filter or use_toml_as_justification) and not toml_path:
-        raise OsvScanError("Elegí un archivo .toml antes de activar esa opción.")
+    if apply_toml_filter and not toml_path:
+        raise OsvScanError("Elegí un archivo .toml antes de activar 'Usarlo como filtro'.")
 
     toml_lookup: dict[str, dict] = {}
     if toml_path:

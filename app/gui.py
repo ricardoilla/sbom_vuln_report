@@ -51,7 +51,6 @@ class ComponentTab(ttk.Frame):
         self._build_run_button()
         self._build_summary_panel()
         self._build_table()
-        self._build_export_buttons()
         self._build_status_bar()
 
     # --- construcción de widgets -------------------------------------------------
@@ -107,17 +106,23 @@ class ComponentTab(ttk.Frame):
             ttk.Label(frame, textvariable=var).grid(row=1, column=i, sticky="w", padx=8, pady=4)
 
     def _build_table(self):
-        toggle_frame = ttk.Frame(self)
-        toggle_frame.pack(fill="x", pady=(0, 4))
+        # Esta barra va siempre pegada arriba de la tabla (no después, donde en una
+        # ventana chica podía quedar fuera de la vista con mucho contenido arriba).
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill="x", pady=(0, 4))
         self.toggle_button = ttk.Button(
-            toggle_frame, text="Ver por paquete", command=self._toggle_view_mode
+            toolbar, text="Ver por paquete", command=self._toggle_view_mode
         )
         self.toggle_button.pack(side="left")
+        ttk.Label(toolbar, text="  |  ").pack(side="left")
+        ttk.Button(toolbar, text="Exportar a Excel (.xlsx)", command=self._export_xlsx).pack(side="left", padx=(0, 8))
+        ttk.Button(toolbar, text="Exportar a CSV", command=self._export_csv).pack(side="left")
+        ttk.Label(toolbar, text="  |  Clic derecho o Ctrl/Cmd+C para copiar.", foreground="#777").pack(side="left")
 
         frame = ttk.Frame(self)
         frame.pack(fill="both", expand=True, pady=(0, 8))
 
-        self.tree = ttk.Treeview(frame, show="headings")
+        self.tree = ttk.Treeview(frame, show="headings", selectmode="extended")
         self._set_tree_columns(VULN_COLUMNS)
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
@@ -130,6 +135,8 @@ class ComponentTab(ttk.Frame):
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
+        self._build_copy_support()
+
     def _set_tree_columns(self, columns_spec):
         keys = [c[0] for c in columns_spec]
         self.tree["columns"] = keys
@@ -137,11 +144,47 @@ class ComponentTab(ttk.Frame):
             self.tree.heading(key, text=title)
             self.tree.column(key, width=width, anchor="w")
 
-    def _build_export_buttons(self):
-        frame = ttk.Frame(self)
-        frame.pack(fill="x", pady=(0, 4))
-        ttk.Button(frame, text="Exportar a Excel (.xlsx)", command=self._export_xlsx).pack(side="left", padx=(0, 8))
-        ttk.Button(frame, text="Exportar a CSV", command=self._export_csv).pack(side="left")
+    # --- copiar al portapapeles --------------------------------------------------
+
+    def _build_copy_support(self):
+        self.tree.bind("<Control-c>", lambda e: self._copy_selection())
+        self.tree.bind("<Command-c>", lambda e: self._copy_selection())
+
+        menu = tk.Menu(self.tree, tearoff=False)
+        menu.add_command(label="Copiar selección", command=self._copy_selection)
+        menu.add_command(label="Copiar todo", command=self._copy_all)
+
+        def show_menu(event):
+            row = self.tree.identify_row(event.y)
+            if row and row not in self.tree.selection():
+                self.tree.selection_set(row)
+            menu.tk_popup(event.x_root, event.y_root)
+
+        self.tree.bind("<Button-3>", show_menu)      # clic derecho (Windows/Linux)
+        self.tree.bind("<Button-2>", show_menu)      # clic derecho en algunos mouse de Mac
+        self.tree.bind("<Control-Button-1>", show_menu)  # Mac sin botón derecho físico
+
+    def _rows_as_tsv(self, item_ids) -> str:
+        headers = [self.tree.heading(col)["text"] for col in self.tree["columns"]]
+        lines = ["\t".join(headers)]
+        for item_id in item_ids:
+            values = self.tree.item(item_id, "values")
+            lines.append("\t".join(str(v) for v in values))
+        return "\n".join(lines)
+
+    def _copy_selection(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        self._copy_to_clipboard(self._rows_as_tsv(selected))
+
+    def _copy_all(self):
+        self._copy_to_clipboard(self._rows_as_tsv(self.tree.get_children()))
+
+    def _copy_to_clipboard(self, text: str):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status.set("Copiado al portapapeles.")
 
     def _build_status_bar(self):
         ttk.Label(self, textvariable=self.status, foreground="#555").pack(anchor="w")
@@ -276,7 +319,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SBOM Vulnerability Report — osv-scanner")
-        self.geometry("1150x720")
+        self.geometry("1200x800")
+        self.minsize(900, 600)
 
         toolbar = ttk.Frame(self, padding=(10, 8))
         toolbar.pack(fill="x")
