@@ -4,23 +4,30 @@ Interfaz de escritorio (Tkinter) para correr [osv-scanner](https://github.com/go
 sobre uno o varios componentes (App, Backend, Admin Panel, ...) y ver/exportar el
 detalle de vulnerabilidades.
 
-## Requisitos
-
-- Python 3.10+
-- [osv-scanner](https://github.com/google/osv-scanner) instalado y en el `PATH`:
-  ```bash
-  brew install osv-scanner
-  ```
-- Dependencias de Python (solo para exportar a Excel):
-  ```bash
-  pip install -r requirements.txt
-  ```
-
-## Uso
+## Inicio rápido
 
 ```bash
-python3 main.py
+./run.sh      # macOS / Linux
+run.bat       # Windows (doble clic o desde cmd)
 ```
+
+Eso crea el entorno virtual (`.venv`) la primera vez, instala las dependencias y abre la app.
+Las siguientes veces solo la abre.
+
+> Requiere Python 3.10+ y [osv-scanner](https://github.com/google/osv-scanner)
+> (`brew install osv-scanner` en macOS; en Windows, descargá el binario desde
+> [releases](https://github.com/google/osv-scanner/releases) y ponelo en el `PATH`).
+
+### Manual (sin el script)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+## Uso
 
 La app abre con 3 pestañas por defecto: **App**, **Backend**, **Admin Panel**.
 Podés agregar más con "+ Agregar pestaña" o cerrar la actual.
