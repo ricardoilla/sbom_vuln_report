@@ -1,5 +1,6 @@
 """Interfaz Tkinter: una pestaña por componente (App, Backend, Admin Panel, ...)."""
 
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -315,12 +316,24 @@ class ComponentTab(ttk.Frame):
         return True
 
 
+ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
+
+
 class App(tk.Tk):
+    def _set_icon(self):
+        """Ícono de la ventana / barra de tareas / Dock."""
+        try:
+            self._icon = tk.PhotoImage(file=str(ICON_PATH))
+            self.iconphoto(True, self._icon)
+        except tk.TclError:
+            pass
+
     def __init__(self):
         super().__init__()
         self.title("SBOM Vulnerability Report — osv-scanner")
         self.geometry("1200x800")
         self.minsize(900, 600)
+        self._set_icon()
 
         toolbar = ttk.Frame(self, padding=(10, 8))
         toolbar.pack(fill="x")
